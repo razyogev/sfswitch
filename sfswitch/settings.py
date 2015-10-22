@@ -8,7 +8,7 @@ PROJECT_PATH = os.path.dirname(os.path.abspath(__file__))
 # See https://docs.djangoproject.com/en/1.6/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = '=@w(^&c*piw%@b!&n3ssiqc=e(r-4u31n4emxicb#*5ftwkiwg'
+SECRET_KEY = ''
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
@@ -16,7 +16,7 @@ TEMPLATE_DEBUG = DEBUG
 THUMBNAIL_DEBUG = DEBUG
 
 ADMINS = (
-    ('Ben Edwards', 'ben@benedwards.co.nz'),
+    ('Admin Name', 'admin@email.com'),
 )
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
@@ -91,5 +91,5 @@ STATICFILES_STORAGE = 'whitenoise.django.GzipManifestStaticFilesStorage'
 
 SALESFORCE_CONSUMER_KEY = os.environ['SALESFORCE_CONSUMER_KEY']
 SALESFORCE_CONSUMER_SECRET = os.environ['SALESFORCE_CONSUMER_SECRET']
-SALESFORCE_REDIRECT_URI = 'https://sfswitch.herokuapp.com/oauth_response'
+SALESFORCE_REDIRECT_URI = os.environ['SALESFORCE_REDIRECT_URI']
 SALESFORCE_API_VERSION = int(os.environ['SALESFORCE_API_VERSION'])
