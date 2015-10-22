@@ -4,17 +4,24 @@ from django.conf import settings
 from zipfile import ZipFile
 from suds.client import Client
 from base64 import b64encode, b64decode
+import requests
+import json
 import xml.etree.ElementTree as ET
 import os
 import glob
 import datetime
 import time
+import sys
+import traceback
+
+reload(sys)
+sys.setdefaultencoding("utf-8")
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'sfswitch.settings')
 
 app = Celery('tasks', broker=os.environ.get('REDISTOGO_URL', 'redis://localhost'))
 
-from enable_disable.models import Job, ValidationRule, WorkflowRule, ApexTrigger, DeployJob, DeployJobComponent
+from enable_disable.models import Job, ValidationRule, WorkflowRule, ApexTrigger, Flow, DeployJob, DeployJobComponent
 
 @app.task
 def get_metadata(job): 
@@ -25,7 +32,7 @@ def get_metadata(job):
 	try:
 
 		# instantiate the metadata WSDL
-		metadata_client = Client('http://sfswitch.herokuapp.com/static/metadata-32.xml')
+		metadata_client = Client('http://sfswitch.herokuapp.com/static/metadata-34.xml')
 
 		# URL for metadata API
 		metadata_url = job.instance_url + '/services/Soap/m/' + str(settings.SALESFORCE_API_VERSION) + '.0/' + job.org_id
@@ -56,16 +63,22 @@ def get_metadata(job):
 		workflows = []
 		triggers = []
 
+		# Note: Only 3 metadata types supported
 		for component in metadata_client.service.listMetadata(component_list, settings.SALESFORCE_API_VERSION):
 
-			if component.type == 'ValidationRule':
-				validation_rules.append(component.fullName)
+			if 'fullName' in component:
 
-			if component.type == 'WorkflowRule':
-				workflows.append(component.fullName)
+				if component.type == 'ValidationRule':
+					validation_rules.append(component.fullName)
 
-			if component.type == 'ApexTrigger':
-				triggers.append(component.fullName)
+				if component.type == 'WorkflowRule':
+					workflows.append(component.fullName)
+
+				if component.type == 'ApexTrigger':
+					triggers.append(component.fullName)
+
+		# Logic to query for details for each type of metadata.
+		# Note: Only 10 components are supported per query, so the list and counter are used to ensure that is met.
 
 		query_list = []
 		loop_counter = 0
@@ -167,98 +180,146 @@ def get_metadata(job):
 
 			loop_counter = loop_counter + 1
 
-		# Get triggers
-		retrieve_request = metadata_client.factory.create('RetrieveRequest')
-		retrieve_request.apiVersion = settings.SALESFORCE_API_VERSION
-		retrieve_request.singlePackage = True
-		retrieve_request.packageNames = None
-		retrieve_request.specificFiles = None
+		# Query for flows
+		# Note: Using the Tooling REST API, as the Metadata API didn't return the stuff I needed
+		# And the Tooling SOAP API I couldn't get working
+		request_url = job.instance_url + '/services/data/v' + str(settings.SALESFORCE_API_VERSION) + '.0/tooling/'
+		request_url += 'query/?q=Select+Id,ActiveVersion.VersionNumber,LatestVersion.VersionNumber,FullName+From+FlowDefinition'
+		headers = { 
+			'Accept': 'application/json',
+			'X-PrettyPrint': 1,
+			'Authorization': 'Bearer ' + job.access_token
+		}
 
-		trigger_retrieve_list = []
+		flows_query = requests.get(request_url, headers = headers)
 
-		for trigger in triggers:
+		if flows_query.status_code == 200 and 'records' in flows_query.json():
 
-			trigger_to_retrieve = metadata_client.factory.create('PackageTypeMembers')
-			trigger_to_retrieve.members = trigger
-			trigger_to_retrieve.name = 'ApexTrigger'
-			trigger_retrieve_list.append(trigger_to_retrieve)
-		
-		package_to_retrieve = metadata_client.factory.create('Package')
-		package_to_retrieve.apiAccessLevel = None
-		package_to_retrieve.types = trigger_retrieve_list
+			for component in flows_query.json()['records']:
 
-		# Add retrieve package to the retrieve request
-		retrieve_request.unpackaged = package_to_retrieve
+				flow = Flow()
+				flow.job = job
+				flow.name = component['FullName']
+				flow.flow_id = component['Id']
+				flow.active = False
 
-		# Start the async retrieve job
-		retrieve_job = metadata_client.service.retrieve(retrieve_request)
+				if 'LatestVersion' in component and component['LatestVersion']:
+					flow.latest_version = component['LatestVersion']['VersionNumber']
+				else:
+					flow.latest_version = 1
 
-		# Set the retrieve result - should be unfinished initially
-		retrieve_result = metadata_client.service.checkRetrieveStatus(retrieve_job.id)
+				if 'ActiveVersion' in component and component['ActiveVersion']:
+					flow.active_version = component['ActiveVersion']['VersionNumber']
+					flow.active = True
 
-		# Continue to query retrieve result until it's done
-		while not retrieve_result.done:
+				flow.save()
 
-			# check job status
-			retrieve_result = metadata_client.service.checkRetrieveStatus(retrieve_job.id)
+		if triggers:
 
-			# sleep job for 3 seconds
-			time.sleep(3)
+			# Get triggers
+			retrieve_request = metadata_client.factory.create('RetrieveRequest')
+			retrieve_request.apiVersion = settings.SALESFORCE_API_VERSION
+			retrieve_request.singlePackage = True
+			retrieve_request.packageNames = None
+			retrieve_request.specificFiles = None
 
-		if not retrieve_result.success:
+			trigger_retrieve_list = []
 
-			job.status = 'Error'
-			job.error = retrieve_result.messages[0]
+			for trigger in triggers:
 
+				trigger_to_retrieve = metadata_client.factory.create('PackageTypeMembers')
+				trigger_to_retrieve.members = trigger
+				trigger_to_retrieve.name = 'ApexTrigger'
+				trigger_retrieve_list.append(trigger_to_retrieve)
+			
+			package_to_retrieve = metadata_client.factory.create('Package')
+			package_to_retrieve.apiAccessLevel = None
+			package_to_retrieve.types = trigger_retrieve_list
+
+			# Add retrieve package to the retrieve request
+			retrieve_request.unpackaged = package_to_retrieve
+
+			# Start the async retrieve job
+			retrieve_job = metadata_client.service.retrieve(retrieve_request)
+
+			# Set the retrieve result - should be unfinished initially
+			retrieve_result = metadata_client.service.checkRetrieveStatus(retrieve_job.id, True)
+
+			# Continue to query retrieve result until it's done
+			while not retrieve_result.done:
+
+				# check job status
+				retrieve_result = metadata_client.service.checkRetrieveStatus(retrieve_job.id, True)
+
+				# sleep job for 3 seconds
+				time.sleep(3)
+
+			if not retrieve_result.success:
+
+				job.status = 'Error'
+				job.json_message = retrieve_result
+
+				if 'errorMessage' in retrieve_result:
+					job.error = retrieve_result.errorMessage
+
+				if 'messages' in retrieve_result:
+					job.error = retrieve_result.messages[0].problem
+
+			else:
+
+				job.json_message = retrieve_result
+
+				# Save the zip file result to server
+				zip_file = open('metadata.zip', 'w+')
+				zip_file.write(b64decode(retrieve_result.zipFile))
+				zip_file.close()
+
+				# Open zip file
+				metadata = ZipFile('metadata.zip', 'r')
+
+				# Loop through files in the zip file
+				for filename in metadata.namelist():
+
+					try:
+
+						if '-meta.xml' not in filename.split('/')[1]:
+							
+							trigger = ApexTrigger()
+							trigger.job = job
+							trigger.name = filename.split('/')[1][:-8]
+							trigger.content = metadata.read(filename)
+							trigger.save()
+
+						else:
+
+							# Take the previous trigger to assign meta content to
+							trigger = ApexTrigger.objects.all().order_by('-id')[0]
+							trigger.meta_content = metadata.read(filename)
+
+							# Find status of trigger from meta xml
+							for node in ET.fromstring(metadata.read(filename)):
+								if 'status' in node.tag:
+									trigger.active = node.text == 'Active'
+									break
+
+							trigger.save()
+
+					# not in a folder (could be package.xml). Skip record
+					except Exception as error:
+						continue
+
+				# Delete zip file, no need to store
+				os.remove('metadata.zip')
+
+				job.status = 'Finished'
 		else:
 
-			# Save the zip file result to server
-			zip_file = open('metadata.zip', 'w+')
-			zip_file.write(b64decode(retrieve_result.zipFile))
-			zip_file.close()
-
-			# Open zip file
-			metadata = ZipFile('metadata.zip', 'r')
-
-			# Loop through files in the zip file
-			for filename in metadata.namelist():
-
-				try:
-
-					if '-meta.xml' not in filename.split('/')[1]:
-						
-						trigger = ApexTrigger()
-						trigger.job = job
-						trigger.name = filename.split('/')[1][:-8]
-						trigger.content = metadata.read(filename)
-						trigger.save()
-
-					else:
-
-						# Take the previous trigger to assign meta content to
-						trigger = ApexTrigger.objects.all().order_by('-id')[0]
-						trigger.meta_content = metadata.read(filename)
-
-						# Find status of trigger from meta xml
-						for node in ET.fromstring(metadata.read(filename)):
-							if 'status' in node.tag:
-								trigger.active = node.text == 'Active'
-								break
-
-						trigger.save()
-
-				# not in a folder (could be package.xml). Skip record
-				except Exception as error:
-					continue
-
-			# Delete zip file, no need to store
-			os.remove('metadata.zip')
-
-		job.status = 'Finished'
+			job.status = 'Finished'
 
 	except Exception as error:
+		
 		job.status = 'Error'
-		job.error = error
+		job.error = traceback.format_exc()
 
 	job.finished_date = datetime.datetime.now()
 	job.save()
@@ -271,14 +332,13 @@ def deploy_metadata(deploy_job):
 	deploy_job.save()
 
 	# Set up metadata API connection
-	metadata_client = Client('http://sfswitch.herokuapp.com/static/metadata-32.xml')
+	metadata_client = Client('http://sfswitch.herokuapp.com/static/metadata-34.xml')
 	metadata_url = deploy_job.job.instance_url + '/services/Soap/m/' + str(settings.SALESFORCE_API_VERSION) + '.0/' + deploy_job.job.org_id
 	metadata_client.set_options(location = metadata_url)
 	session_header = metadata_client.factory.create("SessionHeader")
 	session_header.sessionId = deploy_job.job.access_token
 	metadata_client.set_options(soapheaders = session_header)
 
-	results = []
 	deploy_components = DeployJobComponent.objects.filter(deploy_job = deploy_job.id)
 
 	try:
@@ -299,13 +359,18 @@ def deploy_metadata(deploy_job):
 						update_component.active = deploy_component.enable
 
 					result = metadata_client.service.updateMetadata(update_components)
-					results.append(result)
+
+					if not result[0].success:
+
+						deploy_job.status = 'Error'
+						deploy_job.error = result[0].errors[0].message
 
 					update_list = []
 
 				loop_counter = loop_counter + 1
 
-			deploy_job.status = 'Finished'
+			if deploy_job.status != 'Error':
+				deploy_job.status = 'Finished'
 
 		elif deploy_job.metadata_type == 'workflow_rule':
 
@@ -322,14 +387,62 @@ def deploy_metadata(deploy_job):
 					for update_component in update_components:
 						update_component.active = deploy_component.enable
 
-					result = metadata_client.service.updateMetadata(update_component)
-					results.append(result)
+					result = metadata_client.service.updateMetadata(update_components)
+
+					if not result[0].success:
+
+						deploy_job.status = 'Error'
+						deploy_job.error = result[0].errors[0].message
 
 					update_list = []
 
 				loop_counter = loop_counter + 1
 
-			deploy_job.status = 'Finished'
+			if deploy_job.status != 'Error':
+				deploy_job.status = 'Finished'
+
+		elif deploy_job.metadata_type == 'flow':
+
+			# Deploy flows using REST API
+			# SOAP API doesn't support an easy update
+			request_url = deploy_job.job.instance_url + '/services/data/v' + str(settings.SALESFORCE_API_VERSION) + '.0/tooling/sobjects/FlowDefinition/'
+			headers = { 
+				'Accept': 'application/json',
+				'X-PrettyPrint': 1,
+				'Authorization': 'Bearer ' + deploy_job.job.access_token,
+				'Content-Type': 'application/json'
+			}
+
+			for deploy_component in deploy_components:
+
+				# Set the JSON body to patch
+				if deploy_component.enable:
+
+					flow_update = {
+						'Metadata': {
+							'activeVersionNumber': deploy_component.flow.latest_version
+						}
+					}
+
+				else:
+
+					flow_update = {
+						'Metadata': {
+							'activeVersionNumber': None
+						}
+					}
+
+				# Execute patch request to update the flow
+				result = requests.patch(request_url + deploy_component.flow.flow_id + '/', headers = headers, data = json.dumps(flow_update))
+
+				if result.status_code != 200 and result.status_code != 204:
+					deploy_job.status = 'Error'
+					deploy_job.error = result.json()[0]['errorCode'] + ': ' + result.json()[0]['message']
+
+
+			if deploy_job.status != 'Error':
+				deploy_job.status = 'Finished'
+
 
 		elif deploy_job.metadata_type == 'trigger':
 

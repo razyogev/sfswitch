@@ -51,63 +51,76 @@
 
 {% block content %}
 
-	<div class="inner">
+	<h1>Salesforce Switch</h1>
 
-		<h1>Salesforce Switch</h1>
+	<div class="alert alert-info alert-dismissible" role="alert" >
+		<button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+		Use the Off/On switches and the Enable All/Disable All buttons to specify what you want to activate and deactivate for your Org. Once ready, click Deploy to apply the changes to your Org. Deployment times will vary depending on the number of changes you are making. Triggers tend to take longer than Validation Rules and Workflows (especially for Production Orgs, as all Apex Tests must run on deployment).
+		<br/><br/>
+		You can click on the component names to have a look at what the components are made up of.
+	</div>
 
-		<div class="alert alert-info alert-dismissible" role="alert" >
-			<button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
-			Use the Off/On switches and the Enable All/Disable All buttons to specify what you want to activate and deactivate for your Org. Once ready, click Deploy to apply the changes to your Org. Deployment times will vary depending on the number of changes you are making. Triggers tend to take longer than Validation Rules and Workflows (especially for Production Orgs, as all Apex Tests must run on deployment).
-			<br/><br/>
-			You can click on the component names to have a look at what the components are made up of.
-		</div>
+	<h4>{% if job.username %}{{ job.username }}{% endif %} ({{ job.org_name }})</h4>
 
-		<h4>{{ job.username }} ({{ job.org_name }})</h4>
+	<hr />
 
-		<hr />
+	<div role="tabpanel">
 
-		<div role="tabpanel">
+		<ul class="nav nav-tabs" role="tablist">
 
-			<ul class="nav nav-tabs" role="tablist">
+    		<li role="presentation" class="active">
+    			<a href="#valrules" aria-controls="valrules" role="tab" data-toggle="tab">
+    				Validation Rules
+    			</a>
+    		</li>
 
-	    		<li role="presentation" class="active">
-	    			<a href="#valrules" aria-controls="valrules" role="tab" data-toggle="tab">
-	    				Validation Rules
-	    			</a>
-	    		</li>
+    		<li role="presentation">
+    			<a href="#workflows" aria-controls="workflows" role="tab" data-toggle="tab">
+    				Workflows
+    			</a>
+    		</li>
 
-	    		<li role="presentation">
-	    			<a href="#workflows" aria-controls="workflows" role="tab" data-toggle="tab">
-	    				Workflows
-	    			</a>
-	    		</li>
+    		<li role="presentation">
+    			<a href="#flows" aria-controls="flows" role="tab" data-toggle="tab">
+    				Process Flows
+    			</a>
+    		</li>
 
-	    		<li role="presentation">
-	    			<a href="#triggers" aria-controls="triggers" role="tab" data-toggle="tab">
-	    				Triggers
-	    			</a>
-	    		</li>
+    		<li role="presentation">
+    			<a href="#triggers" aria-controls="triggers" role="tab" data-toggle="tab">
+    				Triggers
+    			</a>
+    		</li>
 
-  			</ul>
+		</ul>
 
-  			<div class="tab-content">
+		<div class="tab-content">
 
-  				<div role="tabpanel" class="tab-pane active" id="valrules">
+			<div role="tabpanel" class="tab-pane active" id="valrules">
 
-  					{% if not val_object_names %}
+				{% if not val_object_names %}
 
-  						<div class="alert alert-warning" role="alert">
-  							There don't appear to be any validation rules for your Org.
-  						</div>
+					<div class="alert alert-warning" role="alert">
+						There don't appear to be any validation rules for your Org.
+					</div>
 
-  					{% else %}
+				{% else %}
 
-  						<button type="button" id="submit__validation_rule" class="btn btn-info btn-sm text-center submit">
+					<div class="col-md-12 text-center deploy-actions">
+
+						<button type="button" id="rollback__validation_rule" class="btn btn-warning btn-sm text-center rollback">
+							Rollback to Original
+						</button>
+						<button type="button" id="submit__validation_rule" class="btn btn-info btn-sm text-center submit">
 							Deploy Changes
 						</button>
 
+					</div>
+
+					<div class="col-md-12">
+
 						<hr style="margin-top:10px;margin-bottom:10px;"/>
-  					
+				
 	  					{% for obj_name in val_object_names %}
 
 	  						<table class="table table-hover">
@@ -181,6 +194,7 @@
 												<td width="10%" id="{{ val_rule.id }}" class="validation_rule">
 													<input type="checkbox" {% if val_rule.active %}checked="checked"{% endif %} data-off-color="warning" data-size="mini" class="new_value" />
 													<input type="hidden" class="old_value" value="{{ val_rule.active }}" />
+													<input type="hidden" class="orig_value" value="{{ val_rule.active }}" />
 												</td>
 											</tr>
 
@@ -194,26 +208,37 @@
 
 	  					{% endfor %}
 
-	  				{% endif %}
+  					</div>
 
-  				</div>
+				{% endif %}
 
-  				<div role="tabpanel" class="tab-pane" id="workflows">
+			</div>
 
-  					{% if not wf_object_names %}
+			<div role="tabpanel" class="tab-pane" id="workflows">
 
-  						<div class="alert alert-warning" role="alert">
-  							There don't appear to be any workflow rules for your Org.
-  						</div>
+				{% if not wf_object_names %}
 
-  					{% else %}
+					<div class="alert alert-warning" role="alert">
+						There don't appear to be any workflow rules for your Org.
+					</div>
 
-  						<button type="button" id="submit__workflow_rule" class="btn btn-info btn-sm text-center submit">
+				{% else %}
+
+					<div class="col-md-12 text-center deploy-actions">
+
+						<button type="button" id="rollback__workflow_rule" class="btn btn-warning btn-sm text-center rollback">
+							Rollback to Original
+						</button>
+						<button type="button" id="submit__workflow_rule" class="btn btn-info btn-sm text-center submit">
 							Deploy Changes
 						</button>
 
+					</div>
+
+					<div class="col-md-12">
+
 						<hr style="margin-top:10px;margin-bottom:10px;"/>
-  					
+					
 	  					{% for obj_name in wf_object_names %}
 
 	  						<table class="table table-hover">
@@ -312,6 +337,7 @@
 												<td width="10%" id="{{ workflow_rule.id }}" class="workflow_rule">
 													<input type="checkbox" {% if workflow_rule.active %}checked="checked"{% endif %} data-off-color="warning" data-size="mini" class="new_value" />
 													<input type="hidden" class="old_value" value="{{ workflow_rule.active }}" />
+													<input type="hidden" class="orig_value" value="{{ workflow_rule.active }}" />
 												</td>
 											</tr>
 
@@ -325,31 +351,120 @@
 
 	  					{% endfor %}
 
-	  				{% endif %}
+	  				</div>
 
-  				</div>
+					{% endif %}
 
-  				<div role="tabpanel" class="tab-pane" id="triggers">
+			</div>
 
-  					{% if not triggers %}
+			<div role="tabpanel" class="tab-pane" id="flows">
 
-  						<div class="alert alert-warning" role="alert">
-  							There don't appear to be any triggers for your Org.
-  						</div>
+				{% if not flows %}
 
-  					{% else %}
+					<div class="alert alert-warning" role="alert">
+						There don't appear to be any Process Flows for your Org.
+					</div>
 
-  						<div class="alert alert-info alert-dismissible" role="alert" style="margin: 5px 0 0 0;">
-  							<button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
-							If you are connecting to a Production Org, all your Apex Tests are run for each change submission you make, so will take substantially more time than Validation Rules and Workflows. Any test failures will cause all triggers as unable to disable until test failures are fixed.
-  						</div>
+				{% else %}
 
-  						<button type="button" id="submit__trigger" class="btn btn-info btn-sm text-center submit">
+					<div class="col-md-12 text-center deploy-actions">
+
+						<button type="button" id="rollback__flow" class="btn btn-warning btn-sm text-center rollback">
+							Rollback to Original
+						</button>
+						<button type="button" id="submit__flow" class="btn btn-info btn-sm text-center submit">
 							Deploy Changes
 						</button>
 
+					</div>
+
+					<div class="col-md-12">
+
 						<hr style="margin-top:10px;margin-bottom:10px;"/>
-  					
+						
+	  					<table class="table table-hover">
+
+	  						<thead>
+
+								<tr>
+									<th width="80%"></th>
+										
+									<th width="10%">
+										<button type="button" class="btn btn-success btn-xs enable">
+											Enable All
+										</button>
+									</th>
+
+									<th width="10%">
+										<button type="button" class="btn btn-danger btn-xs disable">
+											Disable All
+										</button>
+									</th>
+
+								</tr>
+
+							</thead>
+
+							<tbody>
+
+								{% for flow in flows %}
+
+									<tr>
+
+										<td colspan="2" width="90%">
+											{{ flow.name }}
+										</td>
+
+										<td width="10%" id="{{ flow.id }}" class="flow">
+											<input type="checkbox" {% if flow.active %}checked="checked"{% endif %} data-off-color="warning" data-size="mini" class="new_value" />
+											<input type="hidden" class="old_value" value="{{ flow.active }}" />
+											<input type="hidden" class="orig_value" value="{{ flow.active }}" />
+										</td>
+
+									</tr>
+
+								{% endfor %}
+
+							</tbody>
+
+	  					</table>
+
+	  				</div>
+
+				{% endif %}
+				
+			</div>
+
+			<div role="tabpanel" class="tab-pane" id="triggers">
+
+				{% if not triggers %}
+
+					<div class="alert alert-warning" role="alert">
+						There don't appear to be any triggers for your Org.
+					</div>
+
+				{% else %}
+
+					<div class="col-md-12 text-center deploy-actions">
+
+						<div class="alert alert-info alert-dismissible" role="alert" style="margin: 5px 0 0 0;">
+							<button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+						If you are connecting to a Production Org, all your Apex Tests are run for each change submission you make, so will take substantially more time than Validation Rules and Workflows. Any test failures will cause all triggers as unable to disable until test failures are fixed.
+						</div>
+
+						<button type="button" id="rollback__trigger" class="btn btn-warning btn-sm text-center rollback">
+							Rollback to Original
+						</button>
+						<button type="button" id="submit__trigger" class="btn btn-info btn-sm text-center submit">
+							Deploy Changes
+						</button>
+
+					</div>
+
+					<div class="col-md-12">
+
+						<hr style="margin-top:10px;margin-bottom:10px;"/>
+						
 	  					<table class="table table-hover">
 
 	  						<thead>
@@ -388,6 +503,7 @@
 										<td width="10%" id="{{ trigger.id }}" class="trigger">
 											<input type="checkbox" {% if trigger.active %}checked="checked"{% endif %} data-off-color="warning" data-size="mini" class="new_value" />
 											<input type="hidden" class="old_value" value="{{ trigger.active }}" />
+											<input type="hidden" class="orig_value" value="{{ trigger.active }}" />
 										</td>
 
 									</tr>
@@ -398,13 +514,13 @@
 
 	  					</table>
 
-	  				{% endif %}
-  					
-  				</div>
+	  				</div>
 
-  			</div>
+				{% endif %}
+				
+			</div>
 
-  		</div>
+		</div>
 
 	</div>
 

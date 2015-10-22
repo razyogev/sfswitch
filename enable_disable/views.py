@@ -1,7 +1,8 @@
 from django.shortcuts import render_to_response, get_object_or_404
 from django.template import RequestContext
 from django.http import HttpResponse, HttpResponseRedirect
-from enable_disable.models import Job, ValidationRule, WorkflowRule, ApexTrigger, DeployJob, DeployJobComponent
+from django.views.decorators.csrf import csrf_exempt
+from enable_disable.models import Job, ValidationRule, WorkflowRule, ApexTrigger, Flow, DeployJob, DeployJobComponent
 from enable_disable.forms import LoginForm
 from django.conf import settings
 from enable_disable.tasks import get_metadata, deploy_metadata
@@ -11,6 +12,9 @@ import json
 import requests
 import datetime
 from time import sleep
+import sys
+reload(sys)
+sys.setdefaultencoding("utf-8")
 
 def index(request):
 	
@@ -95,13 +99,8 @@ def oauth_response(request):
 
 			if 'logout' in request.POST:
 
-				if 'Production' in environment:
-					login_url = 'https://login.salesforce.com'
-				else:
-					login_url = 'https://test.salesforce.com'
-
-				r = requests.post(login_url + '/services/oauth2/revoke', headers={'content-type':'application/x-www-form-urlencoded'}, data={'token': access_token})
-				return HttpResponseRedirect('/logout?environment=' + environment)
+				r = requests.post(instance_url + '/services/oauth2/revoke', headers={'content-type':'application/x-www-form-urlencoded'}, data={'token': access_token})
+				return HttpResponseRedirect('/logout?instance_prefix=' + instance_url.replace('https://','').replace('.salesforce.com',''))
 
 			if 'get_metadata' in request.POST:
 
@@ -126,14 +125,9 @@ def oauth_response(request):
 def logout(request):
 
 	# Determine logout url based on environment
-	environment = request.GET.get('environment')
-
-	if 'Production' in environment:
-		logout_url = 'https://login.salesforce.com'
-	else:
-		logout_url = 'https://test.salesforce.com'
+	instance_prefix = request.GET.get('instance_prefix')
 		
-	return render_to_response('logout.html', RequestContext(request, {'logout_url': logout_url}))
+	return render_to_response('logout.html', RequestContext(request, {'instance_prefix': instance_prefix}))
 
 # AJAX endpoint for page to constantly check if job is finished
 def job_status(request, job_id):
@@ -153,8 +147,18 @@ def loading(request, job_id):
 	job = get_object_or_404(Job, random_id = job_id)
 
 	if job.status == 'Finished':
-		return HttpResponseRedirect('/job/' + str(job.random_id))
+
+		# Return URL when job is finished
+		return_url = '/job/' + str(job.random_id) + '/'
+
+		# If no header is in URL, keep it there
+		if request.GET.noheader == '1':
+			return_url += '?noheader=1'
+
+		return HttpResponseRedirect(return_url)
+
 	else:
+		
 		return render_to_response('loading.html', RequestContext(request, {'job': job}))	
 
 def job(request, job_id):
@@ -183,7 +187,6 @@ def job(request, job_id):
 	wf_object_names = list(set(wf_object_names))
 	wf_object_names.sort()
 
-	triggers = []
 
 	return render_to_response('job.html', RequestContext(request, {
 		'job': job, 
@@ -191,7 +194,8 @@ def job(request, job_id):
 		'val_rules': job.validation_rules(),
 		'wf_object_names': wf_object_names, 
 		'wf_rules': job.workflow_rules(),
-		'triggers': job.triggers()
+		'triggers': job.triggers(),
+		'flows': job.flows()
 	}))
 
 def update_metadata(request, job_id, metadata_type):
@@ -225,6 +229,10 @@ def update_metadata(request, job_id, metadata_type):
 
 				deploy_job_component.trigger = ApexTrigger.objects.get(id = int(component['component_id']))
 
+			elif metadata_type == 'flow':
+
+				deploy_job_component.flow = Flow.objects.get(id = int(component['component_id']))
+
 			deploy_job_component.enable = component['enable']
 			deploy_job_component.save()
 
@@ -248,4 +256,70 @@ def check_deploy_status(request, deploy_job_id):
 		'error': deploy_job.error
 	}
 
+	return HttpResponse(json.dumps(response_data), content_type = 'application/json')
+
+
+@csrf_exempt
+def auth_details(request):
+	"""
+		RESTful endpoint to pass authentication details
+	"""
+
+	try:
+
+		request_data = json.loads(request.body)
+
+		# Check for all required fields
+		if 'org_id' not in request_data or 'access_token' not in request_data or 'instance_url' not in request_data:
+
+			response_data = {
+				'status': 'Error',
+				'success':  False,
+				'error_text': 'Not all required fields were found in the message. Please ensure org_id, access_token and instance_url are all passed in the payload'
+			}
+
+		# All fields exist. Start job and send response
+		else:
+
+			# create the package record to store results
+			job = Job()
+			job.random_id = uuid.uuid4()
+			job.created_date = datetime.datetime.now()
+			job.status = 'Not Started'
+			job.org_id = request_data['org_id']
+			job.instance_url = request_data['instance_url']
+			job.access_token = request_data['access_token']
+			job.save()
+
+			# Attempt to get username and org name. 
+			try:
+
+				# get the org name of the authenticated user
+				r = requests.get(job.instance_url + '/services/data/v' + str(settings.SALESFORCE_API_VERSION) + '.0/sobjects/Organization/' + job.org_id + '?fields=Name', headers={'Authorization': 'OAuth ' + job.access_token})
+				job.org_name = json.loads(r.text)['Name']
+				job.save()
+
+			# If there is an error, we can live with that.
+			except:
+				pass
+
+			# Run job
+			get_metadata.delay(job)
+
+			# Build response 
+			response_data = {
+				'job_url': 'https://sfswitch.herokuapp.com/loading/' + str(job.random_id) + '/?noheader=1',
+				'status': 'Success',
+				'success': True
+			}
+
+	except Exception as error:
+
+		# If there is an error, raise exception and return
+		response_data = {
+			'status': 'Error',
+			'success':  False,
+			'error_text': str(error)
+		}
+	
 	return HttpResponse(json.dumps(response_data), content_type = 'application/json')

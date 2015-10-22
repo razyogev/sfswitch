@@ -43,13 +43,13 @@ $(document).ready(function()
 		$(this).closest('table').find('input[type=checkbox]').bootstrapSwitch('state', false);
 	});
 
-	// Disable all button
+	// Deploy changes
 	$('.submit').click(function ()
 	{
 		var metadata_type = $(this).attr('id').split('__')[1];
 		var componentIds = [];
 
-		$(this).parent().find('td.' + metadata_type).each(function ()
+		$(this).parent().parent().find('td.' + metadata_type).each(function ()
 		{
 			var new_value = $(this).find('.new_value').bootstrapSwitch('state');
 			var old_value = $(this).find('.old_value').val() == 'True' || $(this).find('.old_value').val() == 'true';
@@ -70,6 +70,45 @@ $(document).ready(function()
 		});
 
 		update_metadata(componentIds, metadata_type);
+
+	});
+
+	// Rollback changes
+	$('.rollback').click(function ()
+	{
+
+		var rollbackAll = confirm('This will rollback all metadata for this metadata type to it\'s original state from when the metadata was first queried.');
+
+		if (rollbackAll)
+		{
+
+			var metadata_type = $(this).attr('id').split('__')[1];
+			var componentIds = [];
+
+			$(this).parent().parent().find('td.' + metadata_type).each(function ()
+			{
+				var new_value = $(this).find('.new_value').bootstrapSwitch('state');
+				var orig_value = $(this).find('.orig_value').val() == 'True' || $(this).find('.orig_value').val() == 'true';
+
+				if (new_value != orig_value)
+				{
+					// Push to component update array
+					var component = {
+						component_id: $(this).attr('id'),
+						enable: orig_value
+					};
+					componentIds.push(component);
+
+					// Set old and new value back to original state
+					$(this).find('.old_value').val(orig_value);
+					$(this).find('.new_value').val(orig_value);
+					$(this).find('.new_value').bootstrapSwitch('state', orig_value);
+				}
+
+			});
+
+			update_metadata(componentIds, metadata_type);
+		}
 
 	});
 

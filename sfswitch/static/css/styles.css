@@ -152,7 +152,6 @@ a.object_link:hover {
     margin-top: 100px;
 }
 
-button.submit {
-    margin: 20px 38% 0;
+.deploy-actions {
+    padding: 20px 0;
 }
-

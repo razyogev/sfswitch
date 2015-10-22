@@ -16,7 +16,7 @@ TEMPLATE_DEBUG = DEBUG
 THUMBNAIL_DEBUG = DEBUG
 
 ADMINS = (
-    ('ADMIN_NAME', 'ADMIN_EMAIL'),
+    ('Ben Edwards', 'ben@benedwards.co.nz'),
 )
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
@@ -42,7 +42,13 @@ MIDDLEWARE_CLASSES = (
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    #'django.middleware.clickjacking.XFrameOptionsMiddleware',
+)
+
+# Add in request context processor
+from django.conf import global_settings
+TEMPLATE_CONTEXT_PROCESSORS = global_settings.TEMPLATE_CONTEXT_PROCESSORS + (
+    'django.core.context_processors.request',
 )
 
 ROOT_URLCONF = 'sfswitch.urls'
@@ -83,7 +89,7 @@ STATICFILES_DIRS = (
 
 STATICFILES_STORAGE = 'whitenoise.django.GzipManifestStaticFilesStorage'
 
-SALESFORCE_CONSUMER_KEY = 'SALESFORCE_CONSUMER_KEY'
-SALESFORCE_CONSUMER_SECRET = 'SALESFORCE_CONSUMER_SECRET'
-SALESFORCE_REDIRECT_URI = 'SALESFORCE_REDIRECT_URI'
-SALESFORCE_API_VERSION = 32
+SALESFORCE_CONSUMER_KEY = os.environ['SALESFORCE_CONSUMER_KEY']
+SALESFORCE_CONSUMER_SECRET = os.environ['SALESFORCE_CONSUMER_SECRET']
+SALESFORCE_REDIRECT_URI = 'https://sfswitch.herokuapp.com/oauth_response'
+SALESFORCE_API_VERSION = int(os.environ['SALESFORCE_API_VERSION'])
