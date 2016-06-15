@@ -113,6 +113,7 @@ def oauth_response(request):
 				job.org_name = org_name
 				job.instance_url = instance_url
 				job.access_token = access_token
+				job.is_sandbox = 'Production' not in environment
 				job.save()
 
 				# Start downloading metadata using async task
@@ -308,7 +309,7 @@ def auth_details(request):
 
 			# Build response 
 			response_data = {
-				'job_url': '/loading/' + str(job.random_id) + '/?noheader=1',
+				'job_url': 'https://sfswitch.herokuapp.com/loading/' + str(job.random_id) + '/?noheader=1',
 				'status': 'Success',
 				'success': True
 			}
